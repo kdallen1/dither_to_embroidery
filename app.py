@@ -70,18 +70,41 @@ HTML_TEMPLATE = """
             <div class="control-group">
                 <div class="control-row">
                     <span class="control-label">Scale:</span>
-                    <input type="range" id="scaleSlider" min="0.25" max="3.0" step="0.25" value="1.0"
+                    <input type="range" id="scaleSlider" min="0.1" max="1.0" step="0.05" value="1.0"
                            onchange="updateScaleDisplay()">
-                    <input type="number" id="scaleValue" min="0.25" max="3.0" step="0.25" value="1.0"
+                    <input type="number" id="scaleValue" min="0.1" max="1.0" step="0.05" value="1.0"
                            onchange="updateScaleSlider()">
                 </div>
                 <div class="size-info" id="scaledSizeInfo">675×450 pixels</div>
             </div>
 
+            <div class="control-group">
+                <div class="control-row">
+                    <input type="checkbox" id="groupingEnabled" onchange="updateGroupingSettings()" style="margin-right: 8px;">
+                    <span class="control-label">Smart Grouping:</span>
+                </div>
+                <div class="control-row" id="groupingControls" style="display: none;">
+                    <span class="control-label">Radius:</span>
+                    <input type="range" id="groupingSlider" min="2" max="10" step="1" value="3"
+                           oninput="updateGroupingSettings()">
+                    <input type="number" id="groupingValue" min="2" max="10" step="1" value="3"
+                           oninput="updateGroupingSettings()">
+                </div>
+                <div class="size-info" id="groupingInfo" style="display: none;">Groups adjacent same-color pixels</div>
+            </div>
+
             <button onclick="loadImage()">📂 Load Image</button>
             <div id="status"></div>
 
-            <button onclick="exportDST()" style="width: 100%; margin-top: 10px;">💾 Export DST</button>
+            <!-- Export Options -->
+            <div style="margin-top: 10px;">
+                <label style="font-weight: bold;">📤 Export:</label>
+                <div style="margin-top: 5px;">
+                    <button onclick="exportFormat('dst')" style="width: 32%; margin-right: 1%;">DST</button>
+                    <button onclick="exportFormat('pes')" style="width: 32%; margin-right: 1%;">PES</button>
+                    <button onclick="exportFormat('pdf')" style="width: 32%;">PDF</button>
+                </div>
+            </div>
         </div>
 
         <!-- Colors Panel -->
@@ -244,6 +267,32 @@ HTML_TEMPLATE = """
             if (number) number.value = value;
         }
 
+        function updateGroupingSettings() {
+            const enabled = document.getElementById('groupingEnabled').checked;
+            const controls = document.getElementById('groupingControls');
+            const info = document.getElementById('groupingInfo');
+            const slider = document.getElementById('groupingSlider');
+            const number = document.getElementById('groupingValue');
+
+            // Show/hide controls
+            controls.style.display = enabled ? 'flex' : 'none';
+            info.style.display = enabled ? 'block' : 'none';
+
+            // Sync slider and number input
+            if (slider.value !== number.value) {
+                if (event.target === slider) {
+                    number.value = slider.value;
+                } else {
+                    slider.value = number.value;
+                }
+            }
+
+            // Trigger stats refresh if image is loaded
+            if (currentColors && Object.keys(currentColors).length > 0) {
+                refreshStatisticsAndPreview();
+            }
+        }
+
         async function showStatistics() {
             try {
                 // Update the stitch types first
@@ -255,8 +304,12 @@ HTML_TEMPLATE = """
                     });
                 }
 
+                // Get grouping settings
+                const groupingEnabled = document.getElementById('groupingEnabled').checked;
+                const groupingRadius = document.getElementById('groupingSlider').value;
+
                 // Get statistics
-                const response = await fetch('/statistics');
+                const response = await fetch(`/statistics?grouping_enabled=${groupingEnabled}&grouping_radius=${groupingRadius}`);
                 const data = await response.json();
 
                 if (data.success) {
@@ -270,14 +323,14 @@ HTML_TEMPLATE = """
         }
 
         function displayStatistics(data) {
-            const { image_stats, color_stats, embroidery_stats } = data;
+            const { image_stats, color_stats, embroidery_stats, dimensions } = data;
 
             let html = `
                 <div class="stats-section">
                     <h3>📊 Quick Stats</h3>
                     <div class="stats-mini-grid">
                         <div class="stat-item">
-                            <div class="stat-label">Size</div>
+                            <div class="stat-label">Pixels</div>
                             <div class="stat-value">${image_stats.width}×${image_stats.height}</div>
                         </div>
                         <div class="stat-item">
@@ -291,6 +344,20 @@ HTML_TEMPLATE = """
                         <div class="stat-item">
                             <div class="stat-label">Thread</div>
                             <div class="stat-value">${embroidery_stats.thread_usage_meters}m</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-section">
+                    <h3>📐 Final Size</h3>
+                    <div class="stats-mini-grid">
+                        <div class="stat-item">
+                            <div class="stat-label">CM</div>
+                            <div class="stat-value">${dimensions.width_cm}×${dimensions.height_cm}</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Inches</div>
+                            <div class="stat-value">${dimensions.width_inches}×${dimensions.height_inches}</div>
                         </div>
                     </div>
                 </div>
@@ -308,8 +375,12 @@ HTML_TEMPLATE = """
                     body: JSON.stringify(currentColors)
                 });
 
-                // Generate preview
-                const response = await fetch('/preview');
+                // Get grouping settings
+                const groupingEnabled = document.getElementById('groupingEnabled').checked;
+                const groupingRadius = document.getElementById('groupingSlider').value;
+
+                // Generate preview with grouping parameters
+                const response = await fetch(`/preview?grouping_enabled=${groupingEnabled}&grouping_radius=${groupingRadius}`);
                 const data = await response.json();
 
                 if (data.success) {
@@ -337,6 +408,39 @@ HTML_TEMPLATE = """
 
                 if (data.success) {
                     alert(`✅ DST file exported: ${data.filename}`);
+                } else {
+                    alert(`❌ Export failed: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Export error: ${error.message}`);
+            }
+        }
+
+        async function exportFormat(format) {
+            try {
+                let endpoint;
+                let filename;
+
+                if (format === 'dst') {
+                    endpoint = '/export';
+                    filename = 'embroidery_output.dst';
+                } else if (format === 'pes') {
+                    endpoint = '/export_pes';
+                    filename = 'embroidery_output.pes';
+                } else if (format === 'pdf') {
+                    endpoint = '/export_pdf';
+                    filename = 'embroidery_preview.pdf';
+                }
+
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({filename: filename})
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert(`✅ ${format.toUpperCase()} file exported: ${data.filename}`);
                 } else {
                     alert(`❌ Export failed: ${data.error}`);
                 }
@@ -430,6 +534,10 @@ def generate_preview():
         return jsonify({'success': False, 'error': 'No image loaded'})
 
     try:
+        # Get grouping parameters from query string
+        grouping_enabled = request.args.get('grouping_enabled', 'false').lower() == 'true'
+        grouping_radius = int(request.args.get('grouping_radius', 2))
+
         # Save original colors
         original_colors = {}
         for key, config in converter.color_configs.items():
@@ -441,8 +549,12 @@ def generate_preview():
         converter.color_configs['color_3'].rgb = (60, 200, 120)   # Bright green
         converter.color_configs['color_4'].rgb = (120, 120, 120)  # Light gray
 
-        # Generate preview exactly like simple_app.py
-        preview_img = converter.generate_preview_image(scale_factor=4)
+        # Generate preview with grouping support
+        preview_img = converter.generate_preview_image(
+            scale_factor=4,
+            use_grouping=grouping_enabled,
+            grouping_radius=grouping_radius
+        )
 
         # Restore original colors
         for key, color in original_colors.items():
@@ -474,12 +586,29 @@ def get_statistics():
         return jsonify({'success': False, 'error': 'No image loaded'})
 
     try:
-        # Get color regions
-        regions = converter.get_color_regions()
+        # Get grouping parameters
+        grouping_enabled = request.args.get('grouping_enabled', 'false').lower() == 'true'
+        grouping_radius = int(request.args.get('grouping_radius', 2))
+
+        # Get color regions (grouped or normal)
+        if grouping_enabled:
+            regions = converter.group_adjacent_pixels(grouping_radius)
+        else:
+            regions = converter.get_color_regions()
 
         # Calculate statistics
         total_pixels = converter.width * converter.height
         used_pixels = sum(len(points) for points in regions.values())
+
+        # Calculate final embroidery dimensions
+        # Use average pixel size across all colors for overall dimensions
+        avg_pixel_size = sum(config.pixel_size for config in converter.color_configs.values()) / len(converter.color_configs)
+        width_mm = converter.width * avg_pixel_size
+        height_mm = converter.height * avg_pixel_size
+        width_cm = width_mm / 10
+        height_cm = height_mm / 10
+        width_inches = width_mm / 25.4
+        height_inches = height_mm / 25.4
 
         color_stats = []
         total_expected_stitches = 0
@@ -511,10 +640,33 @@ def get_statistics():
                 'expected_stitches': expected_stitches
             })
 
-        # Calculate estimates
-        estimated_minutes = total_expected_stitches / 800  # 800 stitches per minute
+        # Calculate estimates considering pixel sizes
+        total_thread_length_mm = 0
+        for color_key, config in converter.color_configs.items():
+            points = regions[color_key]
+            count = len(points)
+            if config.stitch_type == StitchType.NONE:
+                continue
+            elif config.stitch_type == StitchType.FILL:
+                # Fill stitches: approximate length per pixel based on pixel size
+                thread_length_mm = count * config.pixel_size
+            elif config.stitch_type == StitchType.CROSS:
+                # Cross stitches: 4 lines per cross, each line = pixel_size * 1.4 (diagonal)
+                thread_length_mm = count * 4 * config.pixel_size * 1.4
+            else:
+                thread_length_mm = count * config.pixel_size
+
+            total_thread_length_mm += thread_length_mm
+
+        # Time calculation: smaller pixels = more dense stitching = more time
+        # Base rate: 800 stitches per minute, but adjust for pixel density
+        avg_pixel_size = sum(config.pixel_size for config in converter.color_configs.values()) / len(converter.color_configs)
+        density_factor = 2.0 / avg_pixel_size  # 2.0mm is baseline
+        adjusted_stitch_rate = 800 / density_factor
+
+        estimated_minutes = total_expected_stitches / adjusted_stitch_rate
         estimated_hours = estimated_minutes / 60
-        thread_usage_meters = (total_expected_stitches * 2) / 1000  # 2mm per stitch
+        thread_usage_meters = total_thread_length_mm / 1000  # Convert mm to meters
 
         return jsonify({
             'success': True,
@@ -530,6 +682,13 @@ def get_statistics():
                 'estimated_minutes': round(estimated_minutes, 1),
                 'estimated_hours': round(estimated_hours, 1),
                 'thread_usage_meters': round(thread_usage_meters, 1)
+            },
+            'dimensions': {
+                'width_cm': round(width_cm, 1),
+                'height_cm': round(height_cm, 1),
+                'width_inches': round(width_inches, 1),
+                'height_inches': round(height_inches, 1),
+                'avg_pixel_size_mm': round(avg_pixel_size, 1)
             }
         })
 
@@ -553,6 +712,46 @@ def export_dst():
             'filename': filename
         })
 
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/export_pes', methods=['POST'])
+def export_pes():
+    """Export PES file"""
+    global converter
+
+    if not converter:
+        return jsonify({'success': False, 'error': 'No image loaded'})
+
+    try:
+        filename = request.json.get('filename', 'embroidery_output.pes')
+        converter.export_pes(filename)
+
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'format': 'PES'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/export_pdf', methods=['POST'])
+def export_pdf():
+    """Export PDF preview"""
+    global converter
+
+    if not converter:
+        return jsonify({'success': False, 'error': 'No image loaded'})
+
+    try:
+        filename = request.json.get('filename', 'embroidery_preview.pdf')
+        converter.export_pdf_preview(filename)
+
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'format': 'PDF'
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
