@@ -19,67 +19,86 @@ HTML_TEMPLATE = """
 <head>
     <title>Embroidery Converter MVP</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .container { display: flex; gap: 20px; }
-        .controls { flex: 1; }
-        .preview { flex: 1; }
-        .color-card { border: 1px solid #ccc; padding: 15px; margin: 10px 0; border-radius: 8px; }
-        .color-swatch { width: 30px; height: 30px; display: inline-block; margin-right: 10px; border: 1px solid #000; }
-        select, button { padding: 8px; margin: 5px; }
+        body { font-family: Arial, sans-serif; max-width: 100vw; margin: 0; padding: 10px; font-size: 14px; height: 100vh; box-sizing: border-box; }
+        h1 { margin: 0 0 15px 0; font-size: 1.5em; text-align: center; }
+        .main-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; height: calc(100vh - 60px); }
+        .panel { background: #f8f9fa; border-radius: 8px; padding: 12px; overflow-y: auto; }
+
+        /* Controls Panel */
+        .controls-panel h2 { margin: 0 0 10px 0; font-size: 1.1em; }
+        .control-group { margin: 8px 0; padding: 8px; background: white; border-radius: 4px; border: 1px solid #dee2e6; }
+        .control-row { display: flex; align-items: center; margin: 3px 0; }
+        .control-label { min-width: 80px; font-size: 12px; font-weight: bold; }
+        input[type="range"] { flex: 1; margin: 0 8px; }
+        input[type="number"] { width: 50px; padding: 2px; font-size: 12px; }
+        select, button { padding: 6px 8px; font-size: 12px; margin: 2px; }
         button { background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
         button:hover { background: #0056b3; }
-        #preview-image { max-width: 100%; border: 2px solid #007bff; }
-        .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .size-info { font-size: 11px; color: #666; margin-top: 3px; }
+
+        /* Colors Panel */
+        .color-card { border: 1px solid #ddd; padding: 8px; margin: 5px 0; border-radius: 4px; background: white; }
+        .color-swatch { width: 20px; height: 20px; display: inline-block; margin-right: 8px; border: 1px solid #000; vertical-align: middle; }
+        .color-name { font-weight: bold; font-size: 12px; }
+        .color-info { font-size: 11px; color: #666; margin: 2px 0; }
+
+        /* Stats and Preview Panel */
+        .stats-preview-panel { display: flex; flex-direction: column; }
+        .stats-section { background: white; padding: 8px; margin: 5px 0; border-radius: 4px; border: 1px solid #dee2e6; }
+        .stats-section h3 { margin: 0 0 5px 0; font-size: 0.9em; }
+        .stats-mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+        .stat-item { padding: 6px; background: #f8f9fa; border-radius: 3px; text-align: center; }
+        .stat-label { font-size: 10px; font-weight: bold; color: #495057; }
+        .stat-value { font-size: 14px; color: #007bff; font-weight: bold; }
+
+        .preview-container { flex: 1; display: flex; align-items: center; justify-content: center; background: white; border-radius: 4px; border: 1px solid #dee2e6; min-height: 200px; }
+        #preview-image { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+        .status { padding: 6px; margin: 5px 0; border-radius: 4px; font-size: 12px; }
         .success { background: #d4edda; color: #155724; }
         .error { background: #f8d7da; color: #721c24; }
-        .stats-section { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; border: 1px solid #dee2e6; }
-        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 10px; }
-        .stat-item { padding: 10px; background: white; border-radius: 4px; border: 1px solid #e9ecef; }
-        .stat-label { font-weight: bold; color: #495057; }
-        .stat-value { font-size: 1.2em; color: #007bff; }
-        .control-group { margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 6px; }
-        .control-row { display: flex; align-items: center; margin: 5px 0; }
-        .control-label { min-width: 120px; font-weight: bold; }
-        input[type="range"] { flex: 1; margin: 0 10px; }
-        input[type="number"] { width: 70px; padding: 4px; }
-        .size-info { font-size: 0.9em; color: #666; margin-top: 5px; }
     </style>
 </head>
 <body>
     <h1>🧵 Embroidery Converter MVP</h1>
 
-    <div class="container">
-        <div class="controls">
-            <h2>1. Load Image</h2>
+    <div class="main-grid">
+        <!-- Controls Panel -->
+        <div class="panel controls-panel">
+            <h2>🎛️ Controls</h2>
 
             <div class="control-group">
                 <div class="control-row">
-                    <span class="control-label">Image Scale:</span>
+                    <span class="control-label">Scale:</span>
                     <input type="range" id="scaleSlider" min="0.25" max="3.0" step="0.25" value="1.0"
                            onchange="updateScaleDisplay()">
                     <input type="number" id="scaleValue" min="0.25" max="3.0" step="0.25" value="1.0"
                            onchange="updateScaleSlider()">
                 </div>
-                <div class="size-info" id="scaledSizeInfo">
-                    Original size will be 675×450 pixels
-                </div>
+                <div class="size-info" id="scaledSizeInfo">675×450 pixels</div>
             </div>
 
-            <button onclick="loadImage()">Load leftys_horses_tag_bg.png</button>
+            <button onclick="loadImage()">📂 Load Image</button>
             <div id="status"></div>
 
-            <div id="colors"></div>
-
-            <div id="statistics"></div>
-
-            <h2>Export</h2>
-            <button onclick="exportDST()">Export DST File</button>
+            <button onclick="exportDST()" style="width: 100%; margin-top: 10px;">💾 Export DST</button>
         </div>
 
-        <div class="preview">
-            <h2>Preview</h2>
-            <div id="preview-container">
-                <p>Load image and generate preview to see embroidery pattern</p>
+        <!-- Colors Panel -->
+        <div class="panel">
+            <h2>🎨 Colors</h2>
+            <div id="colors">
+                <p style="text-align: center; color: #666; font-size: 12px;">Load image to see colors</p>
+            </div>
+        </div>
+
+        <!-- Stats & Preview Panel -->
+        <div class="panel stats-preview-panel">
+            <div id="statistics"></div>
+
+            <h2>🖼️ Preview</h2>
+            <div class="preview-container" id="preview-container">
+                <p style="color: #666; font-size: 12px;">Preview will appear here</p>
             </div>
         </div>
     </div>
@@ -105,25 +124,26 @@ HTML_TEMPLATE = """
         }
 
         function displayColors(colors) {
-            let html = '<h2>Detected Colors</h2>';
+            let html = '';
             for (const [key, color] of Object.entries(colors)) {
                 const rgb = `rgb(${color.rgb[0]}, ${color.rgb[1]}, ${color.rgb[2]})`;
                 html += `
                     <div class="color-card">
-                        <div class="color-swatch" style="background-color: ${rgb}"></div>
-                        <strong>${color.name}</strong> (${color.pixel_count} pixels)
-                        <br><br>
-                        <div class="control-row">
-                            <span class="control-label">Stitch Type:</span>
-                            <select onchange="updateStitch('${key}', this.value, null)">
-                                <option value="none" ${color.stitch_type === 'none' ? 'selected' : ''}>None (Fabric)</option>
-                                <option value="fill" ${color.stitch_type === 'fill' ? 'selected' : ''}>Fill</option>
-                                <option value="cross" ${color.stitch_type === 'cross' ? 'selected' : ''}>Cross Stitch</option>
-                                <option value="running" ${color.stitch_type === 'running' ? 'selected' : ''}>Running</option>
-                            </select>
+                        <div style="display: flex; align-items: center; margin-bottom: 6px;">
+                            <div class="color-swatch" style="background-color: ${rgb}"></div>
+                            <div class="color-name">${color.name}</div>
                         </div>
+                        <div class="color-info">${color.pixel_count.toLocaleString()} pixels</div>
+
+                        <select style="width: 100%; margin: 4px 0;" onchange="updateStitch('${key}', this.value, null)">
+                            <option value="none" ${color.stitch_type === 'none' ? 'selected' : ''}>None</option>
+                            <option value="fill" ${color.stitch_type === 'fill' ? 'selected' : ''}>Fill</option>
+                            <option value="cross" ${color.stitch_type === 'cross' ? 'selected' : ''}>Cross</option>
+                            <option value="running" ${color.stitch_type === 'running' ? 'selected' : ''}>Running</option>
+                        </select>
+
                         <div class="control-row">
-                            <span class="control-label">Pixel Size (mm):</span>
+                            <span class="control-label">Size:</span>
                             <input type="range" id="pixelSlider_${key}" min="0.5" max="10.0" step="0.5" value="${color.pixel_size}"
                                    oninput="syncPixelControls('${key}', this.value); updateStitch('${key}', null, this.value)">
                             <input type="number" id="pixelNumber_${key}" min="0.5" max="10.0" step="0.5" value="${color.pixel_size}"
@@ -254,60 +274,23 @@ HTML_TEMPLATE = """
 
             let html = `
                 <div class="stats-section">
-                    <h3>📊 Image Statistics</h3>
-                    <div class="stats-grid">
+                    <h3>📊 Quick Stats</h3>
+                    <div class="stats-mini-grid">
                         <div class="stat-item">
-                            <div class="stat-label">Image Size</div>
+                            <div class="stat-label">Size</div>
                             <div class="stat-value">${image_stats.width}×${image_stats.height}</div>
                         </div>
                         <div class="stat-item">
-                            <div class="stat-label">Total Pixels</div>
-                            <div class="stat-value">${image_stats.total_pixels.toLocaleString()}</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="stats-section">
-                    <h3>🎨 Color Distribution</h3>
-            `;
-
-            color_stats.forEach(color => {
-                const rgb = `rgb(${color.rgb[0]}, ${color.rgb[1]}, ${color.rgb[2]})`;
-                html += `
-                    <div class="color-card" style="margin-bottom: 10px;">
-                        <div class="color-swatch" style="background-color: ${rgb}"></div>
-                        <strong>${color.name}</strong>
-                        <div style="margin-top: 8px;">
-                            <div>Pixels: <strong>${color.pixel_count.toLocaleString()}</strong> (${color.percentage}%)</div>
-                            <div>Stitch Type: <strong>${color.stitch_type}</strong></div>
-                            <div>Pixel Size: <strong>${color.pixel_size}mm</strong></div>
-                            <div>Expected Stitches: <strong>${color.expected_stitches.toLocaleString()}</strong></div>
-                        </div>
-                    </div>
-                `;
-            });
-
-            html += `
-                </div>
-
-                <div class="stats-section">
-                    <h3>🧵 Embroidery Estimates</h3>
-                    <div class="stats-grid">
-                        <div class="stat-item">
-                            <div class="stat-label">Total Stitches</div>
-                            <div class="stat-value">${embroidery_stats.total_expected_stitches.toLocaleString()}</div>
+                            <div class="stat-label">Stitches</div>
+                            <div class="stat-value">${Math.round(embroidery_stats.total_expected_stitches/1000)}k</div>
                         </div>
                         <div class="stat-item">
-                            <div class="stat-label">Estimated Time</div>
+                            <div class="stat-label">Time</div>
                             <div class="stat-value">${embroidery_stats.estimated_hours}h</div>
                         </div>
                         <div class="stat-item">
-                            <div class="stat-label">Thread Usage</div>
+                            <div class="stat-label">Thread</div>
                             <div class="stat-value">${embroidery_stats.thread_usage_meters}m</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-label">Complexity</div>
-                            <div class="stat-value">${embroidery_stats.estimated_hours < 5 ? 'Low' : embroidery_stats.estimated_hours < 15 ? 'Medium' : 'High'}</div>
                         </div>
                     </div>
                 </div>
@@ -331,8 +314,10 @@ HTML_TEMPLATE = """
 
                 if (data.success) {
                     document.getElementById('preview-container').innerHTML =
-                        `<img id="preview-image" src="${data.preview_image}" alt="Embroidery Preview">
-                         <p>Size: ${data.size}</p>`;
+                        `<div style="display: flex; flex-direction: column; align-items: center; height: 100%;">
+                            <img id="preview-image" src="${data.preview_image}" alt="Embroidery Preview" style="flex: 1; object-fit: contain;">
+                            <p style="margin: 5px 0 0 0; font-size: 11px; color: #666;">Size: ${data.size}</p>
+                         </div>`;
                 } else {
                     document.getElementById('preview-container').innerHTML = `<p class="error">❌ Error: ${data.error}</p>`;
                 }
