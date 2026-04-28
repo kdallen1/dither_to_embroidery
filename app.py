@@ -160,8 +160,8 @@ HTML_TEMPLATE = """
 
                         <select style="width: 100%; margin: 4px 0;" onchange="updateStitch('${key}', this.value, null)">
                             <option value="none" ${color.stitch_type === 'none' ? 'selected' : ''}>None</option>
-                            <option value="fill" ${color.stitch_type === 'fill' ? 'selected' : ''}>Fill</option>
-                            <option value="cross" ${color.stitch_type === 'cross' ? 'selected' : ''}>Cross</option>
+                            <option value="tatami" ${color.stitch_type === 'tatami' ? 'selected' : ''}>Tatami Fill</option>
+                            <option value="satin" ${color.stitch_type === 'satin' ? 'selected' : ''}>Satin Fill</option>
                             <option value="running" ${color.stitch_type === 'running' ? 'selected' : ''}>Running</option>
                         </select>
 
@@ -482,9 +482,11 @@ def load_image():
             converter.pixels = __import__('numpy').array(scaled_image)
             converter._analyze_colors()
 
-        # Set good defaults like simple_app.py did
-        converter.update_color_config('color_2', StitchType.CROSS, 2.0)  # Blue -> cross stitch
-        converter.update_color_config('color_3', StitchType.CROSS, 2.0)  # Green -> cross stitch
+        # Set good defaults - only stitch the actual design elements
+        converter.update_color_config('color_1', StitchType.NONE, 0.0)     # Black background -> no stitching
+        converter.update_color_config('color_2', StitchType.TATAMI, 2.0)   # Blue -> tatami fill (horse body)
+        converter.update_color_config('color_3', StitchType.TATAMI, 2.0)   # Green -> tatami fill (details)
+        converter.update_color_config('color_4', StitchType.NONE, 0.0)     # Gray background -> no stitching
 
         # Get the configuration
         config = json.loads(converter.get_config_json())
@@ -621,10 +623,10 @@ def get_statistics():
             # Calculate expected stitches
             if config.stitch_type == StitchType.NONE:
                 expected_stitches = 0
-            elif config.stitch_type == StitchType.FILL:
-                expected_stitches = count
-            elif config.stitch_type == StitchType.CROSS:
-                expected_stitches = count * 4  # Each cross = 4 stitches
+            elif config.stitch_type == StitchType.TATAMI:
+                # Tatami: estimate based on density (variable stitches per pixel)
+                area_mm2 = count * (config.pixel_size * 10) ** 2
+                expected_stitches = int(area_mm2 * config.density / 16)  # Professional density
             else:
                 expected_stitches = count
 
@@ -647,12 +649,10 @@ def get_statistics():
             count = len(points)
             if config.stitch_type == StitchType.NONE:
                 continue
-            elif config.stitch_type == StitchType.FILL:
-                # Fill stitches: approximate length per pixel based on pixel size
-                thread_length_mm = count * config.pixel_size
-            elif config.stitch_type == StitchType.CROSS:
-                # Cross stitches: 4 lines per cross, each line = pixel_size * 1.4 (diagonal)
-                thread_length_mm = count * 4 * config.pixel_size * 1.4
+            elif config.stitch_type == StitchType.TATAMI:
+                # Tatami fill: dense parallel lines with proper spacing
+                area_mm2 = count * (config.pixel_size * 10) ** 2
+                thread_length_mm = area_mm2 * config.density / 4.0  # Professional estimate
             else:
                 thread_length_mm = count * config.pixel_size
 
