@@ -400,45 +400,49 @@ class EmbroideryConverter:
         perp_cos = -sin_angle
         perp_sin = cos_angle
 
-        # SIMPLIFIED APPROACH: Work directly in pixel space with proper 45-degree lines
-        # This guarantees we cover every pixel without coordinate transformation errors
-
-        # For 45-degree lines, we can scan much more simply:
-        # - For each diagonal line from top-left to bottom-right
-        # - And from top-right to bottom-left
-
+        # HIGH-RESOLUTION DENSE TATAMI with complete coverage and proper trimming
         line_direction = 1
         last_point = None
 
-        # PASS 1: Top-left to bottom-right diagonals (45 degrees)
-        # Start from leftmost possible position and work right
-        for start_offset in range(-(max_y - min_y), (max_x - min_x) + 1):
+        # Calculate dense line spacing - much tighter for professional dense tatami
+        line_spacing = max(0.3, 1.0 / density)  # Very tight spacing for dense effect
+
+        # PASS 1: High-resolution 45-degree diagonal lines
+        # Generate many more diagonal lines with fractional spacing for density
+        diagonal_start = -(self.height)
+        diagonal_end = self.width
+        current_diagonal = diagonal_start
+
+        while current_diagonal <= diagonal_end:
             current_segment = []
 
-            # Follow this diagonal line across the image
-            for step in range(max(self.width, self.height)):
+            # HIGH-RESOLUTION: Sample every pixel along this diagonal line
+            max_steps = self.width + self.height
+            for step in range(max_steps):
+                # Calculate pixel coordinates for this diagonal
                 if line_direction == 1:
-                    x = min_x + start_offset + step
-                    y = min_y + step
+                    x = int(current_diagonal + step)
+                    y = step
                 else:
-                    x = min_x + start_offset + step
-                    y = max_y - step
+                    x = int(current_diagonal + max_steps - 1 - step)
+                    y = max_steps - 1 - step
 
-                # Check bounds and if pixel is filled
+                # Check bounds and if pixel is filled - HIGH DETAIL DETECTION
                 if (0 <= x < self.width and 0 <= y < self.height and
                     (x, y) in point_set):
                     current_segment.append((x * pixel_size_mm, y * pixel_size_mm))
                 else:
-                    # End segment if we were building one
+                    # PRECISE TRIMMING: End segment when leaving filled area
                     if current_segment:
-                        # Add trim if there's a gap
+                        # Check if we need a trim (careful gap detection)
                         if last_point and current_segment:
                             dist = math.sqrt((current_segment[0][0] - last_point[0])**2 +
                                            (current_segment[0][1] - last_point[1])**2)
-                            if dist > pixel_size_mm * 3:
-                                stitches.append(None)
+                            # More sensitive trim detection for precise cuts
+                            if dist > pixel_size_mm * 1.5:
+                                stitches.append(None)  # Trim for smaller gaps
 
-                        # Add the segment
+                        # Add all stitches in this segment
                         stitches.extend(current_segment)
                         if current_segment:
                             last_point = current_segment[-1]
@@ -449,58 +453,69 @@ class EmbroideryConverter:
                 if last_point and current_segment:
                     dist = math.sqrt((current_segment[0][0] - last_point[0])**2 +
                                    (current_segment[0][1] - last_point[1])**2)
-                    if dist > pixel_size_mm * 3:
+                    if dist > pixel_size_mm * 1.5:
                         stitches.append(None)
 
                 stitches.extend(current_segment)
                 if current_segment:
                     last_point = current_segment[-1]
 
-            # Alternate direction every few lines for density control
-            if start_offset % 2 == 0:
-                line_direction *= -1
+            # DENSER SPACING: Move to next diagonal line with tight spacing
+            current_diagonal += line_spacing
+            # Alternate direction for professional back-and-forth
+            line_direction *= -1
 
-        # PASS 2: Top-right to bottom-left diagonals (-45 degrees for crosshatch)
-        for start_offset in range(max_x + max_y, min_x - max_y - 1, -1):
+        # PASS 2: Perpendicular crosshatch diagonals for complete density
+        # These go the opposite direction for true tatami crosshatch
+        crosshatch_spacing = line_spacing * 2  # Slightly sparser for crosshatch
+
+        diagonal_start_cross = 0
+        diagonal_end_cross = self.width + self.height
+        current_diagonal_cross = diagonal_start_cross
+
+        while current_diagonal_cross <= diagonal_end_cross:
             current_segment = []
 
-            # Follow this diagonal line across the image
-            for step in range(max(self.width, self.height)):
-                x = start_offset - min_y - step
-                y = min_y + step
+            # Sample every pixel along this perpendicular diagonal
+            max_steps = self.width + self.height
+            for step in range(max_steps):
+                # Calculate pixel coordinates for perpendicular diagonal
+                x = int(current_diagonal_cross - step)
+                y = step
 
-                # Check bounds and if pixel is filled
+                # HIGH DETAIL: Check every pixel for precise edge detection
                 if (0 <= x < self.width and 0 <= y < self.height and
                     (x, y) in point_set):
                     current_segment.append((x * pixel_size_mm, y * pixel_size_mm))
                 else:
-                    # End segment if we were building one
+                    # PRECISE CROSSHATCH TRIMMING
                     if current_segment:
-                        # Add trim if there's a gap
                         if last_point and current_segment:
                             dist = math.sqrt((current_segment[0][0] - last_point[0])**2 +
                                            (current_segment[0][1] - last_point[1])**2)
-                            if dist > pixel_size_mm * 4:  # Larger gap for crosshatch
+                            # Crosshatch can have slightly larger gaps
+                            if dist > pixel_size_mm * 2.0:
                                 stitches.append(None)
 
-                        # Add the segment (every 3rd line for crosshatch spacing)
-                        if start_offset % 3 == 0:
-                            stitches.extend(current_segment)
-                            if current_segment:
-                                last_point = current_segment[-1]
+                        stitches.extend(current_segment)
+                        if current_segment:
+                            last_point = current_segment[-1]
                         current_segment = []
 
-            # Add final segment if exists
-            if current_segment and start_offset % 3 == 0:
+            # Add final crosshatch segment
+            if current_segment:
                 if last_point and current_segment:
                     dist = math.sqrt((current_segment[0][0] - last_point[0])**2 +
                                    (current_segment[0][1] - last_point[1])**2)
-                    if dist > pixel_size_mm * 4:
+                    if dist > pixel_size_mm * 2.0:
                         stitches.append(None)
 
                 stitches.extend(current_segment)
                 if current_segment:
                     last_point = current_segment[-1]
+
+            # Move to next crosshatch line with dense spacing
+            current_diagonal_cross += crosshatch_spacing
 
         return stitches
 
