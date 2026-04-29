@@ -332,40 +332,51 @@ class EmbroideryConverter:
 
     def generate_tatami_fill(self, points: List[Tuple[int, int]], pixel_size: float,
                            fill_angle: float = 45.0, density: float = 4.0) -> List[Tuple[float, float]]:
-        """Generate pixelated tatami fill - each pixel becomes a small tatami square with proper trimming"""
+        """Generate pixelated tatami fill - each pixel becomes an isolated square with trim after EVERY pixel"""
         if not points:
             return []
 
+        import math
         stitches = []
+
+        # DON'T sort points - process them in the order given to avoid creating connection patterns
+        # that might look like horizontal lines
 
         # For each pixel, create a small tatami-filled square
         for i, (x, y) in enumerate(points):
             # Convert pixel coordinates to real coordinates
             real_x = x * pixel_size * 10  # Convert to 0.1mm units
             real_y = y * pixel_size * 10
+            square_size = pixel_size * 10
 
-            # Create a small tatami square for this pixel
-            square_size = pixel_size * 10  # Size of each pixel square
-
-            # Generate 2-3 horizontal tatami lines per pixel square
-            num_lines = max(2, int(square_size / 40))  # At least 2 lines, more for larger pixels
+            # Generate simple horizontal lines within this pixel square
+            # IMPORTANT: Add explicit move commands to prevent connecting stitches
+            num_lines = max(2, int(square_size / 40))  # 2-3 lines per square
             line_spacing = square_size / (num_lines + 1)
 
             for j in range(num_lines):
                 y_offset = line_spacing * (j + 1)
-                start_x = real_x + square_size * 0.1  # Small margin from edge
-                end_x = real_x + square_size * 0.9
+                # Keep lines well within the square boundaries
+                start_x = real_x + square_size * 0.15  # Larger margin from edge
+                end_x = real_x + square_size * 0.85    # Larger margin from edge
                 line_y = real_y + y_offset
 
-                stitches.extend([
-                    (start_x, line_y),
-                    (end_x, line_y)
-                ])
+                # For the first line of each pixel, we need a move marker
+                if j == 0:
+                    stitches.append(('MOVE', start_x, line_y))  # Special move marker
 
-            # Add special marker for trim after each pixel (except the last)
-            if i < len(points) - 1:
-                # Use None to indicate trim
-                stitches.append(None)
+                # Add the horizontal line
+                stitches.append((start_x, line_y))
+                stitches.append((end_x, line_y))
+
+                # If there's another line coming, move to its start
+                if j < num_lines - 1:
+                    next_y = real_y + line_spacing * (j + 2)
+                    next_start_x = real_x + square_size * 0.15
+                    stitches.append(('MOVE', next_start_x, next_y))  # Move to next line start
+
+            # ALWAYS add trim after EVERY pixel
+            stitches.append(None)  # Trim marker after EVERY pixel
 
         return stitches
 
@@ -998,11 +1009,42 @@ class EmbroideryConverter:
             # Generate main stitches based on type
             main_stitches = []
             if config.stitch_type == StitchType.TATAMI:
-                # Apply fabric-aware density adjustment
-                adjusted_density = self.get_fabric_adjusted_density(config.density, "cotton")
-                main_stitches = self.generate_tatami_fill(
-                    points, config.pixel_size, config.fill_angle, adjusted_density
-                )
+                # FOR PIXELATED TATAMI: Process each pixel as a separate block to ensure isolation
+                # This forces proper trimming between pixels
+                for point in points:
+                    # Generate stitches for just this one pixel
+                    pixel_stitches = self.generate_tatami_fill(
+                        [point], config.pixel_size, config.fill_angle, config.density
+                    )
+
+                    # Add this pixel's stitches
+                    if pixel_stitches:
+                        # Move to first stitch of this pixel
+                        first_stitch = None
+                        for s in pixel_stitches:
+                            if s is not None and not (isinstance(s, tuple) and len(s) == 3 and s[0] == 'MOVE'):
+                                first_stitch = s
+                                break
+
+                        if first_stitch:
+                            pattern.move_abs(first_stitch[0], first_stitch[1])
+
+                            # Add all stitches for this pixel
+                            for stitch in pixel_stitches:
+                                if stitch is None:
+                                    pattern.trim()
+                                elif isinstance(stitch, tuple) and len(stitch) == 3 and stitch[0] == 'MOVE':
+                                    _, x, y = stitch
+                                    pattern.move_abs(x, y)
+                                else:
+                                    x, y = stitch
+                                    pattern.stitch_abs(x, y)
+
+                            # Force a trim after EVERY pixel
+                            pattern.trim()
+
+                # Skip the normal stitch processing for TATAMI
+                continue
             elif config.stitch_type == StitchType.DENSE_TATAMI:
                 # Apply fabric-aware density adjustment for dense effect
                 adjusted_density = self.get_fabric_adjusted_density(config.density * 1.5, "cotton")  # 50% denser
@@ -1032,25 +1074,25 @@ class EmbroideryConverter:
 
             # Add main stitches with proper sequencing
             if main_stitches:
-                # Apply center-out sequencing for tatami and satin fills to minimize distortion
-                if config.stitch_type in [StitchType.TATAMI, StitchType.DENSE_TATAMI, StitchType.SATIN]:
-                    # Separate trim markers from coordinates for sequencing
-                    coordinate_stitches = [s for s in main_stitches if s is not None]
+                # Apply center-out sequencing for DENSE tatami and satin fills (but NOT regular pixelated tatami)
+                if config.stitch_type in [StitchType.DENSE_TATAMI, StitchType.SATIN]:
+                    # Separate trim and move markers from coordinates for sequencing
+                    coordinate_stitches = [s for s in main_stitches if s is not None and not (isinstance(s, tuple) and len(s) == 3 and s[0] == 'MOVE')]
                     if coordinate_stitches:
                         sequenced_coords = self.apply_center_out_sequencing(coordinate_stitches)
                         # For pixelated fills with trim markers, we keep the original order with trims
                         # as the pixelated approach relies on specific trim placement
-                        if any(s is None for s in main_stitches):
+                        if any(s is None or (isinstance(s, tuple) and len(s) == 3 and s[0] == 'MOVE') for s in main_stitches):
                             # Keep original order with trims for pixelated approach
                             main_stitches = main_stitches
                         else:
                             # Use sequenced order for traditional fills
                             main_stitches = sequenced_coords
 
-                # Find first actual coordinate (skip any None markers at start)
+                # Find first actual coordinate (skip any None or MOVE markers at start)
                 first_coord = None
                 for stitch in main_stitches:
-                    if stitch is not None:
+                    if stitch is not None and not (isinstance(stitch, tuple) and len(stitch) == 3 and stitch[0] == 'MOVE'):
                         first_coord = stitch
                         break
 
@@ -1058,14 +1100,28 @@ class EmbroideryConverter:
                     # Move to first point without stitching
                     pattern.move_abs(first_coord[0], first_coord[1])
 
-                    # Add all main stitches, handling trim markers
+                    # Add all main stitches, handling trim and move markers
+                    prev_was_trim = False
                     for stitch in main_stitches:
                         if stitch is None:
                             # Add trim command
                             pattern.trim()
+                            prev_was_trim = True
+                        elif isinstance(stitch, tuple) and len(stitch) == 3 and stitch[0] == 'MOVE':
+                            # Handle explicit MOVE markers (for tatami)
+                            _, x, y = stitch
+                            pattern.move_abs(x, y)
+                            prev_was_trim = False
                         else:
                             x, y = stitch
-                            pattern.stitch_abs(x, y)
+                            # For regular TATAMI only: move without stitching after trim
+                            # This creates the pixelated effect with isolated squares
+                            if prev_was_trim and config.stitch_type == StitchType.TATAMI:
+                                pattern.move_abs(x, y)
+                                prev_was_trim = False
+                            else:
+                                pattern.stitch_abs(x, y)
+                                prev_was_trim = False
 
                 # End this color section properly
                 pattern.trim()
