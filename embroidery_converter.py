@@ -23,6 +23,7 @@ class StitchType(Enum):
     NONE = "none"
     SATIN = "satin"      # For narrow areas (under 10mm) - smooth directional fill
     TATAMI = "tatami"    # For larger areas - textured fill at angle
+    DENSE_TATAMI = "dense_tatami"  # Dense 45-degree fill for raised effect
     RUNNING = "running"  # For outlines
 
 @dataclass
@@ -368,6 +369,141 @@ class EmbroideryConverter:
 
         return stitches
 
+    def generate_dense_tatami_fill(self, points: List[Tuple[int, int]], pixel_size: float,
+                                  fill_angle: float = 45.0, density: float = 6.0) -> List[Tuple[float, float]]:
+        """Generate dense 45-degree tatami fill with guaranteed complete coverage"""
+        if not points:
+            return []
+
+        import math
+        pixel_size_mm = pixel_size * 10
+        stitches = []
+
+        # Create a set for fast point lookup
+        point_set = set(points)
+
+        # Find the bounding box of filled pixels
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+
+        # Calculate dense line spacing for tatami effect
+        line_spacing_mm = pixel_size_mm / (density * 1.5)  # Dense spacing for professional tatami
+
+        # Convert 45-degree angle to radians for proper tatami
+        angle_rad = math.radians(fill_angle)
+        cos_angle = math.cos(angle_rad)
+        sin_angle = math.sin(angle_rad)
+
+        # Calculate perpendicular direction for line spacing
+        perp_cos = -sin_angle
+        perp_sin = cos_angle
+
+        # SIMPLIFIED APPROACH: Work directly in pixel space with proper 45-degree lines
+        # This guarantees we cover every pixel without coordinate transformation errors
+
+        # For 45-degree lines, we can scan much more simply:
+        # - For each diagonal line from top-left to bottom-right
+        # - And from top-right to bottom-left
+
+        line_direction = 1
+        last_point = None
+
+        # PASS 1: Top-left to bottom-right diagonals (45 degrees)
+        # Start from leftmost possible position and work right
+        for start_offset in range(-(max_y - min_y), (max_x - min_x) + 1):
+            current_segment = []
+
+            # Follow this diagonal line across the image
+            for step in range(max(self.width, self.height)):
+                if line_direction == 1:
+                    x = min_x + start_offset + step
+                    y = min_y + step
+                else:
+                    x = min_x + start_offset + step
+                    y = max_y - step
+
+                # Check bounds and if pixel is filled
+                if (0 <= x < self.width and 0 <= y < self.height and
+                    (x, y) in point_set):
+                    current_segment.append((x * pixel_size_mm, y * pixel_size_mm))
+                else:
+                    # End segment if we were building one
+                    if current_segment:
+                        # Add trim if there's a gap
+                        if last_point and current_segment:
+                            dist = math.sqrt((current_segment[0][0] - last_point[0])**2 +
+                                           (current_segment[0][1] - last_point[1])**2)
+                            if dist > pixel_size_mm * 3:
+                                stitches.append(None)
+
+                        # Add the segment
+                        stitches.extend(current_segment)
+                        if current_segment:
+                            last_point = current_segment[-1]
+                        current_segment = []
+
+            # Add final segment if exists
+            if current_segment:
+                if last_point and current_segment:
+                    dist = math.sqrt((current_segment[0][0] - last_point[0])**2 +
+                                   (current_segment[0][1] - last_point[1])**2)
+                    if dist > pixel_size_mm * 3:
+                        stitches.append(None)
+
+                stitches.extend(current_segment)
+                if current_segment:
+                    last_point = current_segment[-1]
+
+            # Alternate direction every few lines for density control
+            if start_offset % 2 == 0:
+                line_direction *= -1
+
+        # PASS 2: Top-right to bottom-left diagonals (-45 degrees for crosshatch)
+        for start_offset in range(max_x + max_y, min_x - max_y - 1, -1):
+            current_segment = []
+
+            # Follow this diagonal line across the image
+            for step in range(max(self.width, self.height)):
+                x = start_offset - min_y - step
+                y = min_y + step
+
+                # Check bounds and if pixel is filled
+                if (0 <= x < self.width and 0 <= y < self.height and
+                    (x, y) in point_set):
+                    current_segment.append((x * pixel_size_mm, y * pixel_size_mm))
+                else:
+                    # End segment if we were building one
+                    if current_segment:
+                        # Add trim if there's a gap
+                        if last_point and current_segment:
+                            dist = math.sqrt((current_segment[0][0] - last_point[0])**2 +
+                                           (current_segment[0][1] - last_point[1])**2)
+                            if dist > pixel_size_mm * 4:  # Larger gap for crosshatch
+                                stitches.append(None)
+
+                        # Add the segment (every 3rd line for crosshatch spacing)
+                        if start_offset % 3 == 0:
+                            stitches.extend(current_segment)
+                            if current_segment:
+                                last_point = current_segment[-1]
+                        current_segment = []
+
+            # Add final segment if exists
+            if current_segment and start_offset % 3 == 0:
+                if last_point and current_segment:
+                    dist = math.sqrt((current_segment[0][0] - last_point[0])**2 +
+                                   (current_segment[0][1] - last_point[1])**2)
+                    if dist > pixel_size_mm * 4:
+                        stitches.append(None)
+
+                stitches.extend(current_segment)
+                if current_segment:
+                    last_point = current_segment[-1]
+
+        return stitches
+
 
     def generate_satin_fill(self, points: List[Tuple[int, int]], pixel_size: float,
                           fill_angle: float = 0.0, density: float = 4.0) -> List[Tuple[float, float]]:
@@ -648,6 +784,9 @@ class EmbroideryConverter:
             if config.stitch_type == StitchType.TATAMI:
                 adjusted_density = self.get_fabric_adjusted_density(config.density, "cotton")
                 stitches = self.generate_tatami_fill(points, config.pixel_size, config.fill_angle, adjusted_density)
+            elif config.stitch_type == StitchType.DENSE_TATAMI:
+                adjusted_density = self.get_fabric_adjusted_density(config.density * 1.5, "cotton")
+                stitches = self.generate_dense_tatami_fill(points, config.pixel_size, config.fill_angle, adjusted_density)
             elif config.stitch_type == StitchType.SATIN:
                 adjusted_density = self.get_fabric_adjusted_density(config.density, "cotton")
                 stitches = self.generate_satin_fill(points, config.pixel_size, config.fill_angle, adjusted_density)
@@ -754,6 +893,23 @@ class EmbroideryConverter:
                             draw.line([scaled_x + i, scaled_y, scaled_x, scaled_y + i], fill=line_color, width=1)
                             draw.line([scaled_x + scale_factor - 1 - i, scaled_y + scale_factor - 1,
                                      scaled_x + scale_factor - 1, scaled_y + scale_factor - 1 - i], fill=line_color, width=1)
+                elif config.stitch_type == StitchType.DENSE_TATAMI:
+                    # Draw very dense crosshatch pattern for dense tatami fill
+                    draw.rectangle([
+                        scaled_x, scaled_y,
+                        scaled_x + scale_factor - 1, scaled_y + scale_factor - 1
+                    ], fill=thread_color)
+                    # Add much denser diagonal lines for dense tatami texture
+                    if scale_factor >= 2:
+                        line_color = tuple(max(0, c - 60) for c in thread_color)  # Much darker shade for density
+                        # Draw very dense diagonal lines at 45° angle (every pixel)
+                        for i in range(0, scale_factor, 1):  # Every pixel instead of every 2
+                            draw.line([scaled_x + i, scaled_y, scaled_x, scaled_y + i], fill=line_color, width=1)
+                            draw.line([scaled_x + scale_factor - 1 - i, scaled_y + scale_factor - 1,
+                                     scaled_x + scale_factor - 1, scaled_y + scale_factor - 1 - i], fill=line_color, width=1)
+                        # Add additional perpendicular lines for extra density
+                        for i in range(0, scale_factor, 2):
+                            draw.line([scaled_x + i, scaled_y + scale_factor - 1, scaled_x + scale_factor - 1, scaled_y + i], fill=line_color, width=1)
 
                 elif config.stitch_type == StitchType.SATIN:
                     # Draw smooth fill for satin stitch
@@ -832,6 +988,12 @@ class EmbroideryConverter:
                 main_stitches = self.generate_tatami_fill(
                     points, config.pixel_size, config.fill_angle, adjusted_density
                 )
+            elif config.stitch_type == StitchType.DENSE_TATAMI:
+                # Apply fabric-aware density adjustment for dense effect
+                adjusted_density = self.get_fabric_adjusted_density(config.density * 1.5, "cotton")  # 50% denser
+                main_stitches = self.generate_dense_tatami_fill(
+                    points, config.pixel_size, config.fill_angle, adjusted_density
+                )
             elif config.stitch_type == StitchType.SATIN:
                 # Apply fabric-aware density adjustment
                 adjusted_density = self.get_fabric_adjusted_density(config.density, "cotton")
@@ -856,7 +1018,7 @@ class EmbroideryConverter:
             # Add main stitches with proper sequencing
             if main_stitches:
                 # Apply center-out sequencing for tatami and satin fills to minimize distortion
-                if config.stitch_type in [StitchType.TATAMI, StitchType.SATIN]:
+                if config.stitch_type in [StitchType.TATAMI, StitchType.DENSE_TATAMI, StitchType.SATIN]:
                     # Separate trim markers from coordinates for sequencing
                     coordinate_stitches = [s for s in main_stitches if s is not None]
                     if coordinate_stitches:

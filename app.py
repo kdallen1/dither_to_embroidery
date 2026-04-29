@@ -8,10 +8,20 @@ from flask import Flask, render_template_string, jsonify, request
 import base64
 import io
 import json
+import threading
+import time
 from embroidery_converter import EmbroideryConverter, StitchType
 
 app = Flask(__name__)
 converter = None
+
+# Progress tracking
+export_progress = {
+    'status': 'idle',  # 'idle', 'exporting', 'completed', 'error'
+    'progress': 0,     # 0-100
+    'message': '',
+    'filename': ''
+}
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -161,6 +171,7 @@ HTML_TEMPLATE = """
                         <select style="width: 100%; margin: 4px 0;" onchange="updateStitch('${key}', this.value, null)">
                             <option value="none" ${color.stitch_type === 'none' ? 'selected' : ''}>None</option>
                             <option value="tatami" ${color.stitch_type === 'tatami' ? 'selected' : ''}>Tatami Fill</option>
+                            <option value="dense_tatami" ${color.stitch_type === 'dense_tatami' ? 'selected' : ''}>Dense Tatami</option>
                             <option value="satin" ${color.stitch_type === 'satin' ? 'selected' : ''}>Satin Fill</option>
                             <option value="running" ${color.stitch_type === 'running' ? 'selected' : ''}>Running</option>
                         </select>
@@ -432,6 +443,24 @@ HTML_TEMPLATE = """
                     filename = 'embroidery_preview.pdf';
                 }
 
+                // For PDF, handle synchronously (no progress needed)
+                if (format === 'pdf') {
+                    const response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({filename: filename})
+                    });
+
+                    const data = await response.json();
+                    if (data.success) {
+                        alert(`✅ ${format.toUpperCase()} file exported: ${data.filename}`);
+                    } else {
+                        alert(`❌ Export failed: ${data.error}`);
+                    }
+                    return;
+                }
+
+                // For DST/PES, start export and track progress
                 const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -439,13 +468,42 @@ HTML_TEMPLATE = """
                 });
 
                 const data = await response.json();
-                if (data.success) {
-                    alert(`✅ ${format.toUpperCase()} file exported: ${data.filename}`);
-                } else {
+                if (!data.success) {
                     alert(`❌ Export failed: ${data.error}`);
+                    return;
                 }
+
+                // Show progress and poll for completion
+                document.getElementById('status').innerHTML = '<div class="status">🔄 Exporting... Please wait...</div>';
+
+                const checkProgress = async () => {
+                    try {
+                        const progressResponse = await fetch('/export_progress');
+                        const progressData = await progressResponse.json();
+
+                        if (progressData.status === 'completed') {
+                            document.getElementById('status').innerHTML = `<div class="status success">✅ ${format.toUpperCase()} file exported: ${progressData.filename}</div>`;
+                            alert(`✅ ${format.toUpperCase()} file exported: ${progressData.filename}`);
+                        } else if (progressData.status === 'error') {
+                            document.getElementById('status').innerHTML = `<div class="status error">❌ Export failed: ${progressData.message}</div>`;
+                            alert(`❌ Export failed: ${progressData.message}`);
+                        } else if (progressData.status === 'exporting') {
+                            document.getElementById('status').innerHTML = `<div class="status">🔄 ${progressData.message} (${progressData.progress}%)</div>`;
+                            setTimeout(checkProgress, 1000); // Check again in 1 second
+                        } else {
+                            setTimeout(checkProgress, 500); // Check again in 0.5 seconds
+                        }
+                    } catch (error) {
+                        document.getElementById('status').innerHTML = `<div class="status error">❌ Error checking progress: ${error.message}</div>`;
+                    }
+                };
+
+                // Start checking progress
+                setTimeout(checkProgress, 500);
+
             } catch (error) {
                 alert(`❌ Export error: ${error.message}`);
+                document.getElementById('status').innerHTML = `<div class="status error">❌ Export error: ${error.message}</div>`;
             }
         }
     </script>
@@ -695,45 +753,6 @@ def get_statistics():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/export', methods=['POST'])
-def export_dst():
-    """Export DST file"""
-    global converter
-
-    if not converter:
-        return jsonify({'success': False, 'error': 'No image loaded'})
-
-    try:
-        filename = request.json.get('filename', 'embroidery_output.dst')
-        converter.export_dst(filename)
-
-        return jsonify({
-            'success': True,
-            'filename': filename
-        })
-
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/export_pes', methods=['POST'])
-def export_pes():
-    """Export PES file"""
-    global converter
-
-    if not converter:
-        return jsonify({'success': False, 'error': 'No image loaded'})
-
-    try:
-        filename = request.json.get('filename', 'embroidery_output.pes')
-        converter.export_pes(filename)
-
-        return jsonify({
-            'success': True,
-            'filename': filename,
-            'format': 'PES'
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/export_pdf', methods=['POST'])
 def export_pdf():
@@ -755,5 +774,65 @@ def export_pdf():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/export_progress')
+def export_progress_status():
+    """Get export progress status"""
+    return jsonify(export_progress)
+
+def export_with_progress(filename, format_type):
+    """Export with progress tracking"""
+    global export_progress
+    try:
+        export_progress.update({
+            'status': 'exporting',
+            'progress': 10,
+            'message': 'Generating embroidery pattern...',
+            'filename': filename
+        })
+        time.sleep(0.1)  # Small delay to show progress
+
+        export_progress['progress'] = 50
+        export_progress['message'] = 'Creating stitches...'
+
+        if format_type == 'pes':
+            converter.export_pes(filename)
+        else:
+            converter.export_dst(filename)
+
+        export_progress.update({
+            'status': 'completed',
+            'progress': 100,
+            'message': f'Export completed: {filename}'
+        })
+
+    except Exception as e:
+        export_progress.update({
+            'status': 'error',
+            'progress': 0,
+            'message': f'Export failed: {str(e)}'
+        })
+
+@app.route('/export', methods=['POST'])
+def export_dst():
+    """Export DST with progress"""
+    global converter
+    if not converter:
+        return jsonify({'success': False, 'error': 'No image loaded'})
+
+    filename = request.json.get('filename', 'output.dst')
+    threading.Thread(target=export_with_progress, args=(filename, 'dst')).start()
+    return jsonify({'success': True, 'message': 'Export started', 'filename': filename})
+
+@app.route('/export_pes', methods=['POST'])
+def export_pes():
+    """Export PES with progress"""
+    global converter
+    if not converter:
+        return jsonify({'success': False, 'error': 'No image loaded'})
+
+    filename = request.json.get('filename', 'output.pes')
+    threading.Thread(target=export_with_progress, args=(filename, 'pes')).start()
+    return jsonify({'success': True, 'message': 'Export started', 'filename': filename})
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5003)
+    app.run(debug=True, host='0.0.0.0', port=5555)

@@ -27,8 +27,8 @@ def test_trim_fix():
         converter = EmbroideryConverter(test_image_path)
 
         # Configure colors
-        converter.update_color_config('color_1', StitchType.NONE, 0.0)     # Black -> no stitching
-        converter.update_color_config('color_2', StitchType.TATAMI, 2.0)   # Blue -> tatami fill
+        converter.update_color_config('color_1', StitchType.DENSE_TATAMI, 2.0)  # Black -> dense tatami fill
+        converter.update_color_config('color_2', StitchType.NONE, 0.0)          # Blue -> no stitching
 
         print("Generating embroidery pattern...")
 
